@@ -1,0 +1,150 @@
+---
+title: "MachineLearning_Course_Project"
+author: "Andrew Cowan"
+date: "February 14, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This will be an analysis of exercises, attempting to predict the manner in which the exercise was performed ('classe' variable). 
+
+Required elements of analysis:
+
+- Describe how model was built
+- How I used cross validation
+- What the expected out of sample error is
+- Use prediction model to predict 20 cases
+
+Plan
+
+1. Download test and training data sets
+2. Choose appropriate model (look at data and decide)
+3. Create the model
+4. Estimate out of sample error
+5. Predict cases
+
+```{r, ECHO=T, message=F, warning=F}
+library(ggplot2)
+library(dplyr)
+
+library(AppliedPredictiveModeling)
+library(caret)
+library(ElemStatLearn)
+library(pgmm)
+library(rpart)
+library(gbm)
+library(lubridate)
+library(forecast)
+library(e1071)
+```
+
+First, let's download the data. We will download the training and test data sets.
+
+```{r, ECHO=T}
+URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(URL, destfile = "train.csv")
+train <- read.csv("train.csv")
+
+URL1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(URL1, destfile = "test.csv")
+test <- read.csv("test.csv")
+```
+
+The way this dataset works, is that the classes (variable "classe") is the exercise according to the exact specification (A). All others (B-E) correspond to common mistakes. Our goal is to be able to use the movement variables to predict whether someone did the exercise correctly or not. 
+
+This is a HUGE dataset. Let's start by splitting the training dataset into "train" and "testing" datasets so we can do cross validation.
+
+```{r,ECHO=T, message=F, warning=F}
+set.seed(123)
+inTrain = createDataPartition(train$classe, p = 3/4)[[1]]
+
+training = train[ inTrain,]
+
+testing = train[-inTrain,]
+
+```
+
+Not all the variables can be used, and some are missing data (NA). We need to pre-process the dataset first before any useful analyses can be conducted. I'm only interested in the numeric or integer data.
+
+```{r, ECHO=T, message=F, warning=F}
+
+missing_data_colnames <- sapply(names(test), function(x) all(is.na(test[,x]) == TRUE))
+colnames_complete <- names(missing_data_colnames)[missing_data_colnames==FALSE]
+
+colnames_complete <- colnames_complete[-(1:7)]
+colnames_complete <- colnames_complete[1:(length(colnames_complete) -1)]
+
+colnames_complete
+```
+
+Now we have a list of the variables of interest for building the model. Let's proceed with building a model.
+
+# Model Building
+
+We should build several different models and see which performs best. Let's build a LDA, gbm, and random forest model.
+
+```{r, ECHO=F, message=F, warning=F}
+fitControl = trainControl(method='cv', number=3)
+
+model_Forest <- train(classe ~., method = "rf", data = training[,c('classe', colnames_complete)], trControl=fitControl)
+save(model_Forest, file='./ModelFitRF.RData')
+
+model_GBM <- train(classe ~., method = "gbm", data = training[,c('classe', colnames_complete)], trControl=fitControl)
+save(model_GBM, file='./ModelFitGBM.RData')
+
+model_LDA <- train(classe ~., method = "lda", data = training[,c('classe', colnames_complete)], trControl=fitControl)
+save(model_LDA, file='./ModelFitLDA.RData')
+
+```
+
+Next, let's create the predictions for the testing data set using "predict" function and create confusion matrices for all the models:
+
+```{r, ECHO=T, message=F, warning=F}
+
+pred_rf <- predict(model_Forest, testing)
+pred_GBM <- predict(model_GBM, testing)
+pred_LDA <- predict(model_LDA, testing)
+
+cm_RF <- confusionMatrix(pred_rf, testing$classe)
+cm_GBM <- confusionMatrix(pred_GBM, testing$classe)
+cm_LDA <- confusionMatrix(pred_LDA, testing$classe)
+
+```
+
+Then, we need to combine the accuracy results to see which model performs best.
+
+```{r, ECHO=T, message=F, warning=F}
+
+accuracy_results <- data.frame(Model=c('RF', 'GBM', 'LDA'), Accuracy = rbind(cm_RF$overall[1], cm_GBM$overall[1], cm_LDA$overall[1]))
+
+print(accuracy_results)
+
+```
+
+Based on this, the random forest model has the highest accuracy. Let's look more closely at the confusion matrix for the random forest model:
+
+```{r, ECHO=T, message=F, warning=F}
+
+print(cm_RF)
+
+```
+
+Next, we need to predict classe for each of the 20 observations in the test data set. We will use the random forest model based on it's high performance seen above.
+
+```{r, ECHO=T}
+
+prediction_test <- predict(model_Forest, newdata=test)
+
+data.frame(problem_id=test$problem_id, predicted=prediction_test)
+
+```
+
+# Conclusion
+
+We were able to create a highly-predictive model using a random forest algorithm that performed well on the test data set. One potential drawback to the approach I used is the missing data. We only used variables that had complete datasets. Thus there could be some bias introduced into the analysis. A more thorough and time consuming way to get around this could be to impute data for each of the missing columns, however, this would likely be computationally prohibitive. 
+
+
+
